@@ -52,7 +52,7 @@ function QuizRegistrations() {
 
   useEffect(() => {
     const quizRef = ref(rtdb, `quizzes/${quizId}`);
-    const registrationsRef = ref(rtdb, 'participants');
+    const registrationsRef = ref(rtdb, `quizzes/${quizId}/registrations`);
 
     const handleQuizData = (snapshot) => {
       const quizData = snapshot.val();
@@ -68,12 +68,10 @@ function QuizRegistrations() {
         
         if (data) {
           Object.entries(data).forEach(([id, registration]) => {
-            if (registration.quizId === quizId) {
-              quizRegistrations.push({
-                id,
-                ...registration
-              });
-            }
+            quizRegistrations.push({
+              id,
+              ...registration
+            });
           });
         }
         
@@ -99,7 +97,7 @@ function QuizRegistrations() {
 
   const handleDeleteRegistration = async (registrationId) => {
     try {
-      await remove(ref(rtdb, `participants/${registrationId}`));
+      await remove(ref(rtdb, `quizzes/${quizId}/registrations/${registrationId}`));
       setRegistrations(registrations.filter(reg => reg.id !== registrationId));
       setDeleteConfirm(null);
     } catch (error) {

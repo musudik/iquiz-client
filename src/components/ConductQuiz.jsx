@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { rtdb } from '../firebaseConfig';
-import { ref, set, update, onValue, off } from 'firebase/database';
+import { ref, set, update, onValue, off, serverTimestamp, get } from 'firebase/database';
 import {
   Box,
   Typography,
@@ -31,6 +31,7 @@ function ConductQuiz() {
   const [timeLeft, setTimeLeft] = useState(20);
   const [showLeaderboard, setShowLeaderboard] = useState(false);
   const [isTimerExpired, setIsTimerExpired] = useState(false);
+  const [showAnswer, setShowAnswer] = useState(false);
 
   // Add buttonStyle definition
   const buttonStyle = {
@@ -114,7 +115,8 @@ useEffect(() => {
       await update(ref(rtdb, `quizzes/${quizId}/status`), {
         state: 'active',
         currentQuestion: 0,
-        startTime: Date.now()
+        questionStartTime: serverTimestamp(),
+        startTime: serverTimestamp()
       });
       setStartDialogOpen(false);
     } catch (error) {
@@ -124,60 +126,89 @@ useEffect(() => {
 
   const handleResetQuiz = async () => {
     try {
+      // First get all registrations
+      const registrationsRef = ref(rtdb, `quizzes/${quizId}/registrations`);
+      const registrationsSnapshot = await get(registrationsRef);
+      const registrations = registrationsSnapshot.val();
+
+      if (!registrations) {
+        console.log('No registrations found to reset');
+        return;
+      }
+
+      // Create updates object
       const updates = {};
       
       // Reset quiz status
       updates[`quizzes/${quizId}/status`] = {
         state: 'waiting',
         currentQuestion: 0,
-        startTime: null
+        startTime: null,
+        questionStartTime: null
       };
 
-      // Reset all participant scores
-      Object.keys(participants).forEach(participantId => {
-        updates[`quizzes/${quizId}/participants/${participantId}/score`] = 0;
+      // Reset each participant's score and remove their answers
+      Object.keys(registrations).forEach(registrationId => {
+        // Reset score to 0
+        updates[`quizzes/${quizId}/registrations/${registrationId}/score`] = 0;
+        // Remove answers by setting to null
+        updates[`quizzes/${quizId}/registrations/${registrationId}/answers`] = null;
       });
 
+      console.log('Resetting quiz with updates:', updates);
+
+      // Apply all updates in one batch
       await update(ref(rtdb), updates);
+      
       setResetDialogOpen(false);
       setShowLeaderboard(false);
+      console.log('Quiz reset successful');
     } catch (error) {
       console.error('Error resetting quiz:', error);
     }
   };
 
    // Update handleNextQuestion to be more robust
-   const handleNextQuestion = useCallback(async () => {
-    if (!quizStatus || quizStatus.state !== 'active') return;
-  
-    const currentQuestion = quizStatus.currentQuestion;
-    if (currentQuestion < questions.length - 1) {
-      try {
+   const handleNextQuestion = async () => {
+    try {
+      const nextQuestionIndex = (quizStatus.currentQuestion || 0) + 1;
+      if (nextQuestionIndex < questions.length) {
         await update(ref(rtdb, `quizzes/${quizId}/status`), {
-          currentQuestion: currentQuestion + 1,
+          currentQuestion: nextQuestionIndex,
+          questionStartTime: serverTimestamp(),
+          state: 'active'
         });
-        setTimeLeft(20);
-        setIsTimerExpired(false);
-      } catch (error) {
-        console.error('Error updating question:', error);
-      }
-    } else {
-      // End of quiz
-      try {
+      } else {
         await update(ref(rtdb, `quizzes/${quizId}/status`), {
-          state: 'finished',
+          state: 'finished'
         });
         setShowLeaderboard(true);
-      } catch (error) {
-        console.error('Error ending quiz:', error);
       }
+    } catch (error) {
+      console.error('Error moving to next question:', error);
     }
-  }, [quizStatus, questions.length, quizId]);
+  };
 
    // Add timer color logic
    const getTimerColor = () => {
     return timeLeft <= 5 ? '#ff0000' : '#000102';
   };
+
+  // Add function to calculate participant statistics
+  const calculateParticipantStats = useCallback((participant) => {
+    if (!participant.answers) return { score: 0, avgTime: 0, correctAnswers: 0 };
+
+    const answers = Object.values(participant.answers);
+    const correctAnswers = answers.filter(a => a.isCorrect).length;
+    const totalTime = answers.reduce((sum, a) => sum + a.timeToAnswer, 0);
+    const avgTime = answers.length > 0 ? totalTime / answers.length : 0;
+
+    return {
+      score: participant.score || 0,
+      avgTime: Math.round(avgTime / 1000), // Convert to seconds
+      correctAnswers
+    };
+  }, []);
 
   return (
     <Box sx={{ p: 3 }}>
@@ -323,9 +354,22 @@ useEffect(() => {
 
               {/* Next Question button */}
               {isTimerExpired && quizStatus?.state === 'active' && (
-                <Box sx={{ display: 'flex', justifyContent: 'center', mt: 3 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'center', gap: 2, mt: 3 }}>
                   <Button
-                    onClick={handleNextQuestion}
+                    onClick={() => setShowAnswer(true)}
+                    variant="outlined"
+                    sx={{
+                      ...buttonStyle,
+                      minWidth: '200px',
+                    }}
+                  >
+                    Show Answer
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      handleNextQuestion();
+                      setShowAnswer(false); // Reset show answer state
+                    }}
                     variant="contained"
                     sx={{
                       ...buttonStyle,
@@ -334,6 +378,14 @@ useEffect(() => {
                   >
                     Next Question
                   </Button>
+                </Box>
+              )}
+
+              {showAnswer && isTimerExpired && quizStatus?.state === 'active' && (
+                <Box sx={{ mt: 3, p: 2, bgcolor: 'success.light', borderRadius: 1 }}>
+                  <Typography variant="h6" color="success.dark">
+                    Correct Answer: {questions[quizStatus.currentQuestion]?.options[questions[quizStatus.currentQuestion]?.correctAnswer]}
+                  </Typography>
                 </Box>
               )}
             </>
@@ -384,30 +436,55 @@ useEffect(() => {
       <Dialog 
         open={showLeaderboard} 
         fullWidth 
-        maxWidth="sm"
+        maxWidth="md"
       >
         <DialogTitle>Quiz Results</DialogTitle>
         <DialogContent>
-          {Object.entries(participants)
-            .sort(([, a], [, b]) => (b.score || 0) - (a.score || 0))
-            .map(([id, participant], index) => (
-              <Box 
-                key={id} 
-                sx={{ 
-                  display: 'flex', 
-                  justifyContent: 'space-between',
-                  p: 1,
-                  backgroundColor: index === 0 ? '#ffd700' : 'transparent'
-                }}
-              >
-                <Typography>
-                  {index + 1}. {participant.name}
-                </Typography>
-                <Typography>
-                  {participant.score || 0} points
-                </Typography>
-              </Box>
-            ))}
+          <Box sx={{ mb: 2 }}>
+            <Typography variant="h6" gutterBottom>
+              Final Standings
+            </Typography>
+            <Box sx={{ 
+              display: 'grid', 
+              gridTemplateColumns: '50px 1fr 100px 120px 100px',
+              gap: 2,
+              p: 1,
+              borderBottom: '1px solid #eee',
+              fontWeight: 'bold'
+            }}>
+              <Typography>Rank</Typography>
+              <Typography>Name</Typography>
+              <Typography align="right">Score</Typography>
+              <Typography align="right">Avg Time</Typography>
+              <Typography align="right">Correct</Typography>
+            </Box>
+            {Object.entries(participants)
+              .map(([id, participant]) => ({
+                id,
+                ...participant,
+                ...calculateParticipantStats(participant)
+              }))
+              .sort((a, b) => b.score - a.score || a.avgTime - b.avgTime)
+              .map((participant, index) => (
+                <Box 
+                  key={participant.id} 
+                  sx={{ 
+                    display: 'grid',
+                    gridTemplateColumns: '50px 1fr 100px 120px 100px',
+                    gap: 2,
+                    p: 1,
+                    bgcolor: index === 0 ? 'rgba(255, 215, 0, 0.1)' : 'transparent',
+                    '&:hover': { bgcolor: 'rgba(0, 0, 0, 0.02)' }
+                  }}
+                >
+                  <Typography>{index + 1}</Typography>
+                  <Typography>{participant.name}</Typography>
+                  <Typography align="right">{participant.score}</Typography>
+                  <Typography align="right">{participant.avgTime}s</Typography>
+                  <Typography align="right">{participant.correctAnswers}/{questions.length}</Typography>
+                </Box>
+              ))}
+          </Box>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setShowLeaderboard(false)}>Close</Button>

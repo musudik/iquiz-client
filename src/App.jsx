@@ -8,6 +8,7 @@ import CreateQuizQuestions from "./components/CreateQuizQuestions";
 import ConductQuiz from "./components/ConductQuiz";
 import JoinQuiz from "./components/JoinQuiz";
 import QuizRegistrations from "./components/QuizRegistrations";
+import Quiz from "./components/Quiz";
 import "./App.css";
 import logo from "./assets/1EuroQuizLogo.jpg";
 
@@ -85,6 +86,7 @@ function App() {
             path="/quiz/:quizId/registrations"
             element={<QuizRegistrations />}
           />
+          <Route path="/quiz/:quizId" element={<Quiz />} />
         </Routes>
       </Container>
     </Router>

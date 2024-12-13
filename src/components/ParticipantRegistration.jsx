@@ -43,7 +43,9 @@ const generateUniqueQuizLink = (quizId, email, name) => {
   // Handle Unicode characters properly
   const userInfo = `${email}:${name}`;
   const encodedInfo = btoa(encodeURIComponent(userInfo));
-  return `${window.location.origin}/quiz/${quizId}?participant=${encodedInfo}`;
+  const quizLink = `${window.location.origin}/quiz/${quizId}?participant=${encodedInfo}`;
+  console.log('Generated quiz link:', quizLink);
+  return quizLink;
 };
 
 function ParticipantRegistration() {
