@@ -32,7 +32,6 @@ function CreateQuizQuestions() {
     options: [''],
     correctAnswer: 0, // Index of the correct answer
     timeLimit: 20,
-    votes: 0
   });
   const [error, setError] = useState(null);
   const [successMessage, setSuccessMessage] = useState('');
@@ -112,7 +111,6 @@ function CreateQuizQuestions() {
         options: [''],
         correctAnswer: 0,
         timeLimit: 20,
-        votes: 0
       });
       setSuccessMessage('Question added successfully!');
       setError(null);

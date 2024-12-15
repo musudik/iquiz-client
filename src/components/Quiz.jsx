@@ -31,6 +31,7 @@ function Quiz() {
     seconds: 0
   });
   const [questionStartTime, setQuestionStartTime] = useState(null);
+  const prevQuestionIndex = React.useRef(null);
 
   // Validate participant and set up real-time listeners
   useEffect(() => {
@@ -66,7 +67,7 @@ function Quiz() {
             const registrations = snapshot.val();
             
             const registration = Object.values(registrations).find(
-              reg => reg.email === email && reg.name === name
+              reg => reg.userDetails?.email === email && reg.userDetails?.name === name
             );
 
             if (registration) {
@@ -95,46 +96,67 @@ function Quiz() {
 
   // Set up real-time quiz listeners
   const setupQuizListeners = () => {
-    console.log('Setting up quiz listeners for quizId:', quizId);
+    console.log('setupQuizListeners:', quizId);
 
     const quizRef = ref(rtdb, `quizzes/${quizId}`);
     
-    onValue(quizRef, (snapshot) => {
+    onValue(quizRef, async (snapshot) => {
       const quizData = snapshot.val();
-      console.log('Quiz Data Update:', quizData);
+      console.log('Quiz Data Update:', JSON.stringify(quizData));
 
       if (quizData) {
-        // Update quiz status and details
+        // Update quiz status with details
         setQuizStatus(prevStatus => ({
           ...prevStatus,
-          title: quizData.title || 'Untitled Quiz',
-          date: quizData.date || null,
-          questionDuration: quizData.questionDuration || 20,
-          totalQuestions: quizData.questions ? quizData.questions.length : 0,
-          participants: quizData.registrations ? Object.keys(quizData.registrations).length : 0,
-          state: quizData.status?.state || 'waiting'
+          title: quizData?.details?.title || 'Untitled Quiz',
+          date: quizData?.details?.date || null,
+          questionDuration: quizData?.status?.questionDuration || 20,
+          totalQuestions: quizData?.questions ? quizData?.questions?.length : 0,
+          participants: quizData?.details?.participants || 0,
+          state: quizData?.status?.state || 'waiting'
         }));
 
         // Handle current question and timer
-        if (quizData.status?.state === 'active' && 
-            typeof quizData.status.currentQuestion === 'number') {
+        if (quizData?.status?.state === 'active' && 
+            typeof quizData?.status?.currentQuestion === 'number') {
           
-          const currentQuestionData = quizData.questions[quizData.status.currentQuestion];
-          const serverQuestionStartTime = quizData.status.questionStartTime;
+          const currentQuestionData = quizData?.questions[quizData?.status?.currentQuestion];
+          const serverQuestionStartTime = quizData?.status?.questionStartTime;
+          
+          // Check if it's a new question
+          const isNewQuestion = quizData?.status?.currentQuestion !== prevQuestionIndex.current;
           
           if (currentQuestionData && serverQuestionStartTime) {
             setCurrentQuestion({
               ...currentQuestionData,
-              duration: currentQuestionData.timeLimit || quizData.questionDuration || 20
+              duration: currentQuestionData?.timeLimit || quizData?.details?.questionDuration || 20
             });
 
-            // Calculate remaining time
-            const duration = currentQuestionData.timeLimit || quizData.questionDuration || 20;
+            // Calculate remaining time based on server start time
+            const duration = currentQuestionData?.timeLimit || quizData?.details?.questionDuration || 20;
             const elapsed = Math.floor((Date.now() - serverQuestionStartTime) / 1000);
             const remaining = Math.max(0, duration - elapsed);
             
             setTimeLeft(remaining);
             setQuestionStartTime(serverQuestionStartTime);
+
+            // Reset selected answer for new questions
+            if (isNewQuestion) {
+              setSelectedAnswer(null);
+              console.log('New question detected - resetting selected answer');
+            } else if (participant) {
+              // Get current answer if exists
+              try {
+                const participantAnswers = quizData.registrations?.[participant.id]?.answers;
+                if (participantAnswers && participantAnswers[quizData?.status?.currentQuestion]) {
+                  setSelectedAnswer(participantAnswers[quizData?.status?.currentQuestion]?.selectedAnswer);
+                }
+              } catch (error) {
+                console.error('Error fetching current answer:', error);
+              }
+            }
+
+            prevQuestionIndex.current = quizData?.status?.currentQuestion;
           }
         } else {
           setCurrentQuestion(null);
@@ -142,17 +164,31 @@ function Quiz() {
       }
     });
 
+    // Update remaining time every 5 seconds
+    const updateTimer = setInterval(() => {
+      if (quizStatus?.state === 'active' && questionStartTime) {
+        const duration = currentQuestion?.duration || 20;
+        const elapsed = Math.floor((Date.now() - questionStartTime) / 1000);
+        const remaining = Math.max(0, duration - elapsed);
+
+        // Update the remaining time in the database
+        update(ref(rtdb, `quizzes/${quizId}/status`), {
+          questionRemainingTime: remaining
+        });
+      }
+    }, 5000);
+
     return () => off(quizRef);
   };
 
-  // Update timer effect
+  // Update timer effect to use server time consistently
   useEffect(() => {
     let timer;
 
-    if (quizStatus?.state === 'active' && timeLeft > 0 && questionStartTime) {
+    if (quizStatus?.state === 'active' && questionStartTime) {
       timer = setInterval(() => {
-        const elapsed = Math.floor((Date.now() - questionStartTime) / 1000);
         const duration = currentQuestion?.duration || 20;
+        const elapsed = Math.floor((Date.now() - questionStartTime) / 1000);
         const remaining = Math.max(0, duration - elapsed);
         
         setTimeLeft(remaining);
@@ -173,44 +209,16 @@ function Quiz() {
     }
   }, [currentQuestion]);
 
-  // Update handleAnswerSubmit function
+  // Update handleAnswerSubmit to match new structure
   const handleAnswerSubmit = async (selectedOptionIndex) => {
-    if (hasAnswered || !participant) return;
+    if (!participant) return;
 
     const answerTime = Date.now();
     const timeToAnswer = questionStartTime ? answerTime - questionStartTime : 0;
     
     setSelectedAnswer(selectedOptionIndex);
-    setHasAnswered(true);
 
     try {
-      // Find participant ID from registrations
-      const registrationsRef = ref(rtdb, `quizzes/${quizId}/registrations`);
-      const registrationsSnapshot = await get(registrationsRef);
-      const registrations = registrationsSnapshot.val();
-      
-      const participantId = Object.keys(registrations).find(
-        key => registrations[key].email === participant.email && 
-               registrations[key].name === participant.name
-      );
-
-      if (!participantId) {
-        console.error('Participant ID not found');
-        return;
-      }
-
-      // Check if answer is correct - subtract 1 from correctAnswer to match 0-based index
-      const isCorrect = selectedOptionIndex === (currentQuestion.correctAnswer - 1);
-      const newScore = isCorrect ? score + 10 : score;
-      
-      // Create answer data object
-      const answerData = {
-        selectedAnswer: selectedOptionIndex,
-        isCorrect,
-        timeToAnswer,
-        answeredAt: answerTime
-      };
-
       // Get current question index
       const statusRef = ref(rtdb, `quizzes/${quizId}/status`);
       const statusSnapshot = await get(statusRef);
@@ -221,12 +229,29 @@ function Quiz() {
         return;
       }
 
+      // Check if answer is correct
+      const isCorrect = selectedOptionIndex === (currentQuestion.correctAnswer - 1);
+      
+      // Create answer data
+      const answerData = {
+        selectedAnswer: selectedOptionIndex,
+        isCorrect,
+        timeToAnswer,
+        answeredAt: answerTime
+      };
+
+      // Update score based on correctness
+      const newScore = isCorrect ? score + 10 : score;
+
       const updates = {};
-      updates[`quizzes/${quizId}/registrations/${participantId}/answers/${currentQuestionIndex}`] = answerData;
-      updates[`quizzes/${quizId}/registrations/${participantId}/score`] = newScore;
+      // Update answer in the new structure
+      updates[`quizzes/${quizId}/registrations/${participant.id}/answers/${currentQuestionIndex}`] = answerData;
+      updates[`quizzes/${quizId}/registrations/${participant.id}/userDetails/score`] = newScore;
 
       setScore(newScore);
       await update(ref(rtdb), updates);
+
+      console.log('Answer updated:', answerData);
 
     } catch (error) {
       console.error('Error submitting answer:', error);
@@ -443,7 +468,6 @@ function Quiz() {
               fullWidth
               variant={selectedAnswer === index ? 'contained' : 'outlined'}
               onClick={() => handleAnswerSubmit(index)}
-              disabled={hasAnswered || timeLeft === 0}
               sx={{
                 p: 2,
                 textAlign: 'left',
@@ -477,8 +501,6 @@ function Quiz() {
 
       {/* Answer feedback - only show when timer is complete */}
       {timeLeft === 0 && (
-        console.log(currentQuestion.correctAnswer),
-        console.log(selectedAnswer),
         <Alert 
           severity={Number(selectedAnswer) === Number(currentQuestion.correctAnswer) ? "success" : "error"}
           sx={{ mt: 3 }}
@@ -522,7 +544,7 @@ function Quiz() {
   return (
     <Box sx={{ maxWidth: 800, mx: 'auto', p: 3 }}>
       <Paper elevation={3} sx={{ p: 3 }}>
-        {quizStatus?.state === 'waiting' && renderWaitingScreen()}
+        {quizStatus?.state === 'not-started' && renderWaitingScreen()}
         {quizStatus?.state === 'active' && currentQuestion && renderQuestion()}
         {quizStatus?.state === 'active' && !currentQuestion && (
           <Box sx={{ textAlign: 'center', p: 4 }}>

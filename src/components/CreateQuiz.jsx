@@ -67,10 +67,12 @@ function CreateQuiz() {
           
           if (data) {
             Object.keys(data).forEach((key) => {
-              quizzesData.push({
-                id: key,
-                ...data[key]
-              });
+              if (data[key].details) {
+                quizzesData.push({
+                  id: key,
+                  ...data[key].details
+                });
+              }
             });
           }
           
@@ -105,29 +107,45 @@ function CreateQuiz() {
   const saveQuizToFirebase = async (quiz) => {
     try {
       setError(null);
+
+      // Check for unique quiz name
+      const existingQuiz = quizzes.find(q => q.title.toLowerCase() === quiz.title.toLowerCase());
+      if (existingQuiz && (!selectedQuiz || existingQuiz.id !== selectedQuiz.id)) {
+        setError('Quiz name must be unique');
+        return;
+      }
+
       let quizRef;
-      
       if (selectedQuiz) {
         quizRef = ref(rtdb, `quizzes/${selectedQuiz.id}`);
       } else {
-        quizRef = push(ref(rtdb, 'quizzes'));
+        const newQuizRef = push(ref(rtdb, 'quizzes'));
+        quizRef = ref(rtdb, `quizzes/${newQuizRef.key}`);
       }
-      
+
       if (!quizRef) {
         throw new Error('Failed to create quiz reference');
       }
 
       const quizDataToSave = {
-        ...quiz,
-        participants: Number(quiz.participants) || 0,
-        fees: Number(quiz.fees) || 0,
-        questionDuration: Number(quiz.questionDuration) || 20,
-        updatedAt: new Date().toISOString(),
-        ...(selectedQuiz ? {} : { createdAt: new Date().toISOString() })
+        details: {
+          ...quiz,
+          participants: Number(quiz.participants) || 0,
+          fees: Number(quiz.fees) || 0,
+          questionDuration: Number(quiz.questionDuration) || 20,
+          updatedAt: new Date().toISOString(),
+          ...(selectedQuiz ? {} : { createdAt: new Date().toISOString() })
+        },
+        status: {
+          state: 'not-started',
+          currentQuestion: -1,
+          questionStartTime: null,
+          questionRemainingTime: null
+        }
       };
 
       await (selectedQuiz ? update(quizRef, quizDataToSave) : set(quizRef, quizDataToSave));
-      
+
       setShowQuizForm(false);
       setSelectedQuiz(null);
       resetQuizForm();
@@ -206,7 +224,7 @@ function CreateQuiz() {
 
   const handleDeleteQuiz = async (quizId) => {
     try {
-      const quizRef = ref(rtdb, `quizzes/${quizId}`);
+      const quizRef = ref(rtdb, `quizzes/${quizId}/details`);
       await remove(quizRef);
       setQuizzes(quizzes.filter(quiz => quiz.id !== quizId));
     } catch (error) {

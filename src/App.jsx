@@ -7,7 +7,7 @@ import Leaderboard from "./components/Leaderboard";
 import CreateQuizQuestions from "./components/CreateQuizQuestions";
 import ConductQuiz from "./components/ConductQuiz";
 import JoinQuiz from "./components/JoinQuiz";
-import QuizRegistrations from "./components/QuizRegistrations";
+import ViewRegistrations from "./components/ViewRegistrations";
 import Quiz from "./components/Quiz";
 import "./App.css";
 import logo from "./assets/1EuroQuizLogo.jpg";
@@ -84,7 +84,7 @@ function App() {
           <Route path="/join/:quizId" element={<JoinQuiz />} />
           <Route
             path="/quiz/:quizId/registrations"
-            element={<QuizRegistrations />}
+            element={<ViewRegistrations />}
           />
           <Route path="/quiz/:quizId" element={<Quiz />} />
         </Routes>

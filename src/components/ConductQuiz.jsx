@@ -210,6 +210,20 @@ useEffect(() => {
     };
   }, []);
 
+  // Update remaining time every 5 seconds
+  const updateTimer = setInterval(() => {
+    if (quizStatus?.state === 'active' && questionStartTime) {
+      const duration = currentQuestion?.duration || 20;
+      const elapsed = Math.floor((Date.now() - questionStartTime) / 1000);
+      const remaining = Math.max(0, duration - elapsed);
+
+      // Update the remaining time in the database
+      update(ref(rtdb, `quizzes/${quizId}/status`), {
+        remainingTime: remaining
+      });
+    }
+  }, 5000);
+
   return (
     <Box sx={{ p: 3 }}>
       {/* Header Section */}

@@ -119,22 +119,27 @@ function ParticipantRegistration() {
       // Generate unique quiz link
       const quizLink = generateUniqueQuizLink(selectedQuiz.id, email, name);
 
-      // Create registration under quiz's registrations node
+      // Create registration under quiz's registrations node with userDetails structure
       const registrationsRef = ref(
         rtdb,
-        `quizzes/${selectedQuiz.id}/registrations`,
+        `quizzes/${selectedQuiz.id}/registrations`
       );
       const newRegistrationRef = push(registrationsRef);
 
-      await set(newRegistrationRef, {
-        name,
-        email,
-        mobile,
-        registeredAt: new Date().toISOString(),
-        paymentMethod,
-        paymentStatus: "completed",
-        quizLink, // Store the unique link in the registration
-      });
+      const registrationData = {
+        userDetails: {
+          name,
+          email,
+          mobile,
+          registeredAt: new Date().toISOString(),
+          paymentMethod: "paypal",
+          paymentStatus: "completed",
+          quizLink
+        },
+        answers: []
+      };
+
+      await set(newRegistrationRef, registrationData);
 
       // Send email with unique quiz link
       try {
@@ -152,15 +157,15 @@ function ParticipantRegistration() {
       } catch (emailError) {
         console.error(
           "Failed to send email:",
-          emailError.response?.data || emailError,
+          emailError.response?.data || emailError
         );
         setError(
-          "Registration successful but failed to send confirmation email. Please contact support.",
+          "Registration successful but failed to send confirmation email. Please contact support."
         );
       }
 
       setSuccess(
-        "Registration successful! Check your email for confirmation and quiz link.",
+        "Registration successful! Check your email for confirmation and quiz link."
       );
       setName("");
       setEmail("");
@@ -218,20 +223,25 @@ function ParticipantRegistration() {
           // Create registration under quiz's registrations node
           const registrationsRef = ref(
             rtdb,
-            `quizzes/${selectedQuiz.id}/registrations`,
+            `quizzes/${selectedQuiz.id}/registrations`
           );
           const newRegistrationRef = push(registrationsRef);
 
-          await set(newRegistrationRef, {
-            name,
-            email,
-            mobile,
-            registeredAt: new Date().toISOString(),
-            paymentMethod: "bank",
-            paymentStatus: "pending",
-            iban: iban.trim(),
-            quizLink, // Store the unique link in the registration
-          });
+          const registrationData = {
+            userDetails: {
+              name,
+              email,
+              mobile,
+              registeredAt: new Date().toISOString(),
+              paymentMethod: "bank",
+              paymentStatus: "pending",
+              iban: iban.trim(),
+              quizLink
+            },
+            answers: []
+          };
+
+          await set(newRegistrationRef, registrationData);
 
           // Send email with unique quiz link
           try {
@@ -250,15 +260,15 @@ function ParticipantRegistration() {
           } catch (emailError) {
             console.error(
               "Failed to send email:",
-              emailError.response?.data || emailError,
+              emailError.response?.data || emailError
             );
             setError(
-              "Registration successful but failed to send confirmation email. Please contact support.",
+              "Registration successful but failed to send confirmation email. Please contact support."
             );
           }
 
           setSuccess(
-            "Registration pending. Please complete the bank transfer. Check your email for details and quiz link.",
+            "Registration pending. Please complete the bank transfer. Check your email for details and quiz link."
           );
           setOpenDialog(false);
           break;
@@ -304,27 +314,27 @@ function ParticipantRegistration() {
             >
               <CardContent>
                 <Typography variant="h5" component="div" gutterBottom>
-                  {quiz.title}
+                  {quiz.details?.title}
                 </Typography>
 
                 <Box sx={{ display: "flex", alignItems: "center", mb: 1 }}>
                   <AccessTime sx={{ mr: 1, color: "text.secondary" }} />
                   <Typography variant="body2" color="text.secondary">
-                    {new Date(quiz.date).toLocaleString()}
+                    {new Date(quiz.details?.date).toLocaleString()}
                   </Typography>
                 </Box>
 
                 <Box sx={{ display: "flex", alignItems: "center", mb: 1 }}>
                   <Group sx={{ mr: 1, color: "text.secondary" }} />
                   <Typography variant="body2" color="text.secondary">
-                    {quiz.participants} participants max
+                    {quiz.details?.participants} participants max
                   </Typography>
                 </Box>
 
                 <Box sx={{ display: "flex", alignItems: "center", mb: 1 }}>
                   <AttachMoney sx={{ mr: 1, color: "text.secondary" }} />
                   <Typography variant="body2" color="text.secondary">
-                    Entry Fee: ${quiz.fees}
+                    Entry Fee: ${quiz.details?.fees}
                   </Typography>
                 </Box>
 
